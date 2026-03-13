@@ -1,0 +1,852 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <title>Tour ESAN 360 - Experiencia VR Premium</title>
+    <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
+    <script src="https://unpkg.com/aframe-look-at-component@0.8.0/dist/aframe-look-at-component.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/c-frame/aframe-physics-system@v4.2.2/dist/aframe-physics-system.min.js"></script>
+
+    <style>
+      #pantalla-carga {
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background: linear-gradient(135deg, #E3173E, #E3173E);
+        z-index: 9999; display: flex; flex-direction: column;
+        justify-content: center; align-items: center;
+        color: white; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        transition: opacity 1s ease, transform 1s ease;
+      }
+      .oculto { opacity: 0; pointer-events: none; transform: scale(1.1); }
+      
+      #btn-menu-2d {
+        position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
+        padding: 15px 30px; background-color: rgba(0, 0, 0, 0.7); color: white;
+        border: 2px solid #00BFFF; border-radius: 30px; font-size: 16px;
+        font-weight: bold; cursor: pointer; z-index: 100; backdrop-filter: blur(5px);
+        transition: all 0.3s ease; box-shadow: 0 0 15px rgba(0, 191, 255, 0.5);
+      }
+      #btn-menu-2d:hover { background-color: #E3173E; color: #000; scale: 1.05; }
+      
+      #btn-capturar {
+        position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+        padding: 10px 20px; background-color: #E3173E; color: white;
+        border: 2px solid white; border-radius: 10px; font-weight: bold;
+        cursor: pointer; z-index: 100; box-shadow: 0 0 10px rgba(0,0,0,0.5);
+      }
+      #btn-capturar:hover { background-color: #00BFFF; }
+
+      .a-enter-vr #btn-menu-2d, .a-enter-vr #btn-capturar { display: none; }
+    </style>
+    
+    <script>
+      var escenaActual = 'fuera'; 
+
+      const nombresDestinos = {
+        'fuera': 'ESAN',
+        'entrada': 'Entrada\nPrincipal',
+        'jardin': 'Jardin\nCentral',
+        'fuente': 'Fuente',
+        'capilla': 'Capilla',
+        
+        'cafeteria': 'Cafeteria',
+        'eventos': 'Espacio de\nEventos',
+        'auditorio': 'Auditorio',
+        'danza': 'Sala de\nDanza',
+        'biblioteca': 'Biblioteca',
+        
+        'voley': 'Cancha de\nVoley',
+        'basquet': 'Cancha de\nBasquet',
+        'aula': 'Aulas',
+        'aula_hibrida': 'Aula\nHibrida',
+        'estudio_pregrado': 'Sala Estudio\nPregrado',
+        
+        'estudio_mba': 'Sala Estudio\nMBA',
+        'estudio_magister': 'Sala Estudio\nMagister',
+        'descanso_magister': 'Sala Descanso\nMagister',
+        'conductual': 'Sala\nConductual',
+        'fablab1': 'FabLab',
+        
+        'fablab_salon': 'Salon de\nFabLab',
+        'computo': 'Lab de\nComputo',
+        'datalab': 'Data Lab',
+        'fisica': 'Lab de\nFisica',
+        'quimica': 'Lab de\nQuimica'
+      };
+
+      AFRAME.registerComponent('rotate-with-camera', {
+        tick: function () {
+          var camera = this.el.sceneEl.camera; 
+          if (!camera) return;
+          var camEl = document.querySelector('[camera]');
+          if (!camEl) return;
+          var camRot = camEl.getAttribute('rotation');
+          if(camRot){ this.el.setAttribute('rotation', {x: 0, y: camRot.y, z: 0}); }
+        }
+      });
+
+      AFRAME.registerComponent('telekinesis-balon', {
+        init: function () {
+          this.manoActiva = null;
+          this.agarrado = false;
+          this.el.addEventListener('mousedown', (evt) => {
+            if (this.agarrado) return;
+            this.manoActiva = evt.detail.cursorEl || document.querySelector('#camara-principal'); 
+            this.agarrado = true;
+            this.el.removeAttribute('dynamic-body'); 
+          });
+          this.el.addEventListener('mouseup', () => {
+            if (!this.agarrado) return;
+            this.agarrado = false;
+            this.el.setAttribute('dynamic-body', 'mass: 1; bounce: 0.75'); 
+            var dir = new THREE.Vector3();
+            this.manoActiva.object3D.getWorldDirection(dir);
+            dir.multiplyScalar(-1); 
+            dir.multiplyScalar(12); 
+            dir.y += 4; 
+            setTimeout(() => {
+              if(this.el.components['dynamic-body']) {
+                 this.el.components['dynamic-body'].body.velocity.set(0,0,0);
+                 this.el.components['dynamic-body'].body.applyImpulse(
+                   new CANNON.Vec3(dir.x, dir.y, dir.z),
+                   new CANNON.Vec3(0, 0, 0)
+                 );
+              }
+            }, 50);
+            this.manoActiva = null;
+          });
+        },
+        tick: function () {
+          if (this.agarrado && this.manoActiva) {
+            var posPuntero = new THREE.Vector3();
+            this.manoActiva.object3D.getWorldPosition(posPuntero);
+            var dirPuntero = new THREE.Vector3();
+            this.manoActiva.object3D.getWorldDirection(dirPuntero);
+            dirPuntero.multiplyScalar(-1);
+            posPuntero.add(dirPuntero.multiplyScalar(0.6));
+            this.el.object3D.position.copy(posPuntero);
+          }
+        }
+      });
+
+      AFRAME.registerComponent('sistema-puntos', {
+        init: function () {
+          this.puntos = 0;
+          this.puedeAnotar = true;
+          this.pelota = document.querySelector('#pelota-interactiva');
+          this.marcador = document.querySelector('#texto-marcador');
+          this.posAro = new THREE.Vector3(0, 3.5, -11.5); 
+        },
+        tick: function () {
+          if (!this.pelota || !this.puedeAnotar) return;
+          var posPelota = this.pelota.object3D.position;
+          var distancia = posPelota.distanceTo(this.posAro);
+          if (distancia < 0.8) {
+            this.puntos++;
+            this.marcador.setAttribute('value', 'PUNTOS: ' + this.puntos);
+            this.pelota.setAttribute('color', '#00FF00'); 
+            this.puedeAnotar = false; 
+            setTimeout(() => {
+              this.pelota.setAttribute('color', '#D95C14');
+              this.puedeAnotar = true;
+            }, 1500);
+          }
+          if (posPelota.y < -5 || posPelota.distanceTo(new THREE.Vector3(0,0,0)) > 30) resetearPelota();
+        }
+      });
+
+      AFRAME.registerComponent('smooth-follow', {
+        tick: function () {
+          if (this.el.getAttribute('visible') === false) return;
+          var cam = document.querySelector('#camara-principal').object3D;
+          var targetPos = new THREE.Vector3(0, 0, -8);
+          targetPos.applyMatrix4(cam.matrixWorld);
+          this.el.object3D.position.lerp(targetPos, 0.08);
+          var lookAtPos = new THREE.Vector3().copy(cam.position);
+          lookAtPos.y = this.el.object3D.position.y;
+          this.el.object3D.lookAt(lookAtPos);
+        }
+      });
+
+      AFRAME.registerComponent('hotspot-info', {
+        schema: { target: {type: 'string'}, action: {type: 'string', default: 'toggle'} },
+        init: function () {
+          var el = this.el; var data = this.data;
+          el.addEventListener('click', function (evt) {
+            var panel = document.querySelector(data.target);
+            var fondoOscuro = document.querySelector('#hotspot-darkbg'); 
+            if (!panel) return;
+            evt.stopPropagation(); 
+            if (data.action === 'close') {
+                panel.setAttribute('visible', 'false'); panel.classList.remove('panel-activo');
+                if(fondoOscuro) fondoOscuro.setAttribute('visible', 'false');
+            } else {
+                panel.setAttribute('visible', 'true'); panel.classList.add('panel-activo');
+                if(fondoOscuro) fondoOscuro.setAttribute('visible', 'true'); 
+                var cam = document.querySelector('#camara-principal').object3D;
+                var startPos = new THREE.Vector3(0, 0, -8); 
+                startPos.applyMatrix4(cam.matrixWorld);
+                panel.object3D.position.copy(startPos);
+                var lookAtPos = new THREE.Vector3().copy(cam.position);
+                lookAtPos.y = panel.object3D.position.y;
+                panel.object3D.lookAt(lookAtPos);
+            }
+          });
+          el.addEventListener('mouseenter', function () { if (data.action !== 'close') el.setAttribute('scale', '0.75 0.75 0.75'); else el.setAttribute('color', '#FF5555'); });
+          el.addEventListener('mouseleave', function () { if (data.action !== 'close') el.setAttribute('scale', '0.65 0.65 0.65'); else el.setAttribute('color', '#FF0000'); });
+        }
+      });
+
+      AFRAME.registerComponent('hotspot-video', {
+        schema: { video: {type: 'string'}, panel: {type: 'string'} },
+        init: function () {
+          var el = this.el; var data = this.data;
+          el.addEventListener('click', function (evt) {
+            var vidEl = document.querySelector(data.video);
+            var panelEl = document.querySelector(data.panel);
+            var fondoOscuro = document.querySelector('#hotspot-darkbg');
+            if (!panelEl || !vidEl) return;
+            evt.stopPropagation();
+            el.setAttribute('visible', 'false'); el.classList.remove('icono-hotspot'); 
+            if(fondoOscuro) fondoOscuro.setAttribute('visible', 'true');
+            panelEl.setAttribute('visible', 'true'); panelEl.classList.add('panel-activo');
+            var cam = document.querySelector('#camara-principal').object3D;
+            var startPos = new THREE.Vector3(0, 0, -8); 
+            startPos.applyMatrix4(cam.matrixWorld);
+            panelEl.object3D.position.copy(startPos);
+            var lookAtPos = new THREE.Vector3().copy(cam.position);
+            lookAtPos.y = panelEl.object3D.position.y;
+            panelEl.object3D.lookAt(lookAtPos);
+            var btnCerrar = panelEl.querySelector('.close-video-btn');
+            if (btnCerrar) btnCerrar.classList.add('clickable');
+            vidEl.muted = false; vidEl.currentTime = 0; vidEl.play();
+          });
+          el.addEventListener('mouseenter', function () { el.setAttribute('scale', '1.1 1.1 1.1'); });
+          el.addEventListener('mouseleave', function () { el.setAttribute('scale', '1 1 1'); });
+        }
+      });
+
+      AFRAME.registerComponent('close-video', {
+        schema: { video: {type: 'string'}, panel: {type: 'string'}, thumb: {type: 'string'} },
+        init: function () {
+          var el = this.el; var data = this.data;
+          el.addEventListener('click', function(evt){
+             evt.stopPropagation();
+             var vidEl = document.querySelector(data.video);
+             var panelEl = document.querySelector(data.panel);
+             var thumbEl = document.querySelector(data.thumb);
+             var fondoOscuro = document.querySelector('#hotspot-darkbg');
+             if(vidEl) vidEl.muted = true;
+             if(panelEl) { panelEl.setAttribute('visible', 'false'); panelEl.classList.remove('panel-activo'); }
+             el.classList.remove('clickable'); 
+             if(thumbEl) { thumbEl.setAttribute('visible', 'true'); thumbEl.classList.add('icono-hotspot'); }
+             if(fondoOscuro) fondoOscuro.setAttribute('visible', 'false');
+          });
+          el.addEventListener('mouseenter', function () { el.setAttribute('color', '#FF5555'); });
+          el.addEventListener('mouseleave', function () { el.setAttribute('color', '#FF0000'); });
+        }
+      });
+
+      const escenas = {
+        'fuera': { imagen: '#img-fuera', rotacionSky: '0 90 0', flechas: [ { target: 'entrada', position: '-10 2.5 -7.42', rotation: '0 0 0' } ] },
+        'entrada': { imagen: '#img-entrada', rotacionSky: '0 -100 0', flechas: [ { target: 'jardin', position: '-0.03 2 -18', rotation: '0 -155 0' }, { target: 'fuera', position: '0 2 15', rotation: '0 180 0' } ] },
+        'jardin': { imagen: '#img-jardin', rotacionSky: '0 -90 0', flechas: [ { target: 'fuente', position: '-11.99 3 -0.5', rotation: '0 0 0' }, { target: 'entrada', position: '9.12 3.1 -7.79', rotation: '0 150 0' }, { target: 'cafeteria', position: '-10 3 -6', rotation: '0 0 0'}, { target: 'conductual', position: '-3.80 3 -11.38', rotation: '0 -162 0' },] },
+        'fuente': { imagen: '#img-fuente', rotacionSky: '0 -5 0', flechas: [ { target: 'jardin', position: '2 2.8 11', rotation: '0 -45 0' }, { target: 'capilla', position: '-11.72 3 -3', rotation: '0 45 0' }, { target: 'cafeteria', position: '10.63 2.5 -5.55', rotation: '0 118 0' }, ] },
+        'capilla': { imagen: '#img-capilla', rotacionSky: '0 -90 0', flechas: [ { target: 'fablab1', position: '11.73 2.7 1.25', rotation: '0 110 0' }, { target: 'fuente', position: '-0.98 1.7 11.87', rotation: '0 -5 0' }, ] },
+        'cafeteria': { imagen: '#img-cafeteria', rotacionSky: '0 -180 0', flechas: [ { target: 'jardin', position: '2.50 3 11.35', rotation: '0 -140 0' }, { target: 'eventos', position: '1.21 2.8 -11.93', rotation: '0 -96 0' }, { target: 'aula', position: '11.97 2.8 -0.78', rotation: '0 -176 0' }, { target: 'estudio_magister', position: '9.87 2.8 -6.82', rotation: '0 124 0' }, ] },
+        'eventos': { imagen: '#img-eventos', rotacionSky: '0 -190 0', flechas: [ { target: 'auditorio', position: '-3.71 3 11.41', rotation: '0 110 0' }, { target: 'danza', position: '-11.84 3 1.96', rotation: '0 50 0' }, { target: 'biblioteca', position: '-11.99 3 0.53', rotation: '0 -45 0' }, { target: 'basquet', position: '-2.88 6 11.30', rotation: '0 86 0' }, { target: 'cafeteria', position: '4.64 5 10.84', rotation: '0 125 0' }, ] },
+        'auditorio': { imagen: '#img-auditorio', rotacionSky: '0 -90 0', flechas: [ { target: 'eventos', position: '-8 5 25', rotation: '0 5 0' } ] },
+        'voley': { imagen: '#img-voley', rotacionSky: '0 -90 0', flechas: [ { target: 'basquet', position: '11 3 3.15', rotation: '0 160 0' }, { target: 'fablab1', position: '4.60 4 11.07', rotation: '0 23 0' }, { target: 'eventos', position: '6.76 3 -9.91', rotation: '0 146 0' }, ] },
+        'basquet': { imagen: '#img-basquet', rotacionSky: '0 90 0', flechas: [ { target: 'voley', position: '8.57 3 -8.29', rotation: '0 -45 0' }, { target: 'eventos', position: '-6.42 3 10.14', rotation: '0 -32 0' }, { target: 'cafeteria', position: '-8.31 3 8.66', rotation: '0 -44 0' }, ] },
+        'fablab_salon': { imagen: '#img-fablab-salon', rotacionSky: '0 -90 0', flechas: [ { target: 'fablab1', position: '6.83 2.8 10', rotation: '0 0 0' } ] },
+        'fablab1': { imagen: '#img-fablab1', rotacionSky: '0 180 0', flechas: [ { target: 'fablab_salon', position: '11 2.8 6', rotation: '0 0 0' }, { target: 'voley', position: '6.75 2.8 9.92', rotation: '0 30 0' }, { target: 'capilla', position: '4.93 2.8 10.93', rotation: '0 24 0' }, ] },
+        'aula': { imagen: '#img-aulas', rotacionSky: '0 90 0', flechas: [ { target: 'aula_hibrida', position: '7.91 3 -9', rotation: '0 0 0' }, { target: 'cafeteria', position: '9.39 3 7.38', rotation: '0 52 0' },] },
+        'aula_hibrida': { imagen: '#img-aula-hibrida', rotacionSky: '0 -90 0', flechas: [ { target: 'aula', position: '11.3 2.8 4', rotation: '0 0 0' }, { target: 'computo', position: '6.91 2.8 -9.80', rotation: '0 70 0' }, ] },
+        'computo': { imagen: '#img-computo', rotacionSky: '0 -90 0', flechas: [ { target: 'datalab', position: '7.49 2.8 -9.37', rotation: '0 0 0' }, { target: 'aula_hibrida', position: '9.74 2.8 7.00', rotation: '0 54 0' }, ] },
+        'datalab': { imagen: '#img-datalab', rotacionSky: '0 -90 0', flechas: [ { target: 'quimica', position: '-8.93 2.8 -8', rotation: '0 180 0' }, { target: 'computo', position: '8.76 2.8 -8.18', rotation: '0 133 0' },] },
+        'conductual': { imagen: '#img-conductual', rotacionSky: '0 90 0', flechas: [ { target: 'jardin', position: '4.29 2.8 11.20', rotation: '0 0 0' } ] },
+        'biblioteca': { imagen: '#img-biblioteca', rotacionSky: '0 -90 0', flechas: [ { target: 'eventos', position: '7 3 9.70', rotation: '0 40 0' }, { target: 'danza', position: '-3.49 3 11.48', rotation: '0 -17 0' }, ] },
+        'danza': { imagen: '#img-danza', rotacionSky: '0 90 0', flechas: [ { target: 'eventos', position: '-4 2.8 11.26', rotation: '0 180 0' }, { target: 'biblioteca', position: '3.40 2.8 11.50', rotation: '0 -164 0' }, ] },
+        'fisica': { imagen: '#img-fisica', rotacionSky: '0 90 0', flechas: [ { target: 'quimica', position: '7.02 2.8 9.72', rotation: '0 0 0' } ] },
+        'quimica': { imagen: '#img-quimica', rotacionSky: '0 90 0', flechas: [ { target: 'datalab', position: '7.5 2.8 9.35', rotation: '0 0 0' }, { target: 'fisica', position: '7.67 2.8 -9.21', rotation: '0 140 0' },] },
+        'estudio_pregrado': { imagen: '#img-estudio-pregrado', rotacionSky: '0 90 0', flechas: [ { target: 'estudio_magister', position: '-9.54 2.8 7.27', rotation: '0 0 0' } ] },
+        'estudio_mba': { imagen: '#img-estudio-mba', rotacionSky: '0 180 0', flechas: [ { target: 'estudio_magister', position: '8.76 2.8 8.18', rotation: '0 0 0' }, { target: 'descanso_magister', position: '1.14 2.8 11.94', rotation: '0 -176 0' }, ] },
+        'estudio_magister': { imagen: '#img-estudio-magister', rotacionSky: '0 -90 0', flechas: [ { target: 'descanso_magister', position: '3.85 2.8 -11.35', rotation: '0 -105 0' }, { target: 'estudio_mba', position: '6.60 2.8 -10.01', rotation: '0 -113 0' }, { target: 'estudio_pregrado', position: '10.09 0 -6.16', rotation: '0 -116 0' }, { target: 'cafeteria', position: '8.83 0 7.49', rotation: '0 139 0' }, ] },
+        'descanso_magister': { imagen: '#img-descanso-magister', rotacionSky: '0 0 0', flechas: [ { target: 'estudio_magister', position: '9.10 2.8 -7.80', rotation: '0 0 0' }, { target: 'estudio_mba', position: '8.22 2.8 -8.72', rotation: '0 137 0' }, ] }
+      };
+
+      // =============================================================
+      // HOVER ACTUALIZADO: TAMAÑOS REDUCIDOS DE ICONO DE NAVEGACIÓN
+      // =============================================================
+      AFRAME.registerComponent('tour-logic', {
+        init: function () {
+          var el = this.el;
+          el.addEventListener('click', function (evt) {
+            var target = el.getAttribute('data-target');
+            var direccionDeseada = el.getAttribute('data-mirar'); 
+            if (target && target !== "null") iniciarTransicion(target, direccionDeseada);
+          });
+          el.addEventListener('mouseenter', function () {
+            // Animación adaptada a la escala más pequeña
+            el.setAttribute('animation__scale', 'property: scale; to: 1.6 1.6 1.6; dur: 200; easing: easeOutQuad');
+            var etiqueta = el.querySelector('.etiqueta-flotante');
+            if (etiqueta) etiqueta.setAttribute('visible', 'true');
+          });
+          el.addEventListener('mouseleave', function () {
+            el.setAttribute('animation__scale', 'property: scale; to: 1.4 1.4 1.4; dur: 200; easing: easeOutQuad');
+            var etiqueta = el.querySelector('.etiqueta-flotante');
+            if (etiqueta) etiqueta.setAttribute('visible', 'false');
+          });
+        }
+      });
+
+      AFRAME.registerComponent('menu-interactivo', {
+        init: function () {
+          var el = this.el;
+          el.addEventListener('click', function () {
+            var target = el.getAttribute('data-target');
+            if (target) { toggleMenu3D(); iniciarTransicion(target, "0 0 0"); } 
+          });
+          el.addEventListener('mouseenter', function () {
+            el.setAttribute('color', '#FFFFFF');
+            el.setAttribute('scale', '1.05 1.05 1.05');
+            var txt = el.querySelector('a-text');
+            if(txt) txt.setAttribute('color', '#E3173E');
+          });
+          el.addEventListener('mouseleave', function () {
+            el.setAttribute('color', '#E3173E');
+            el.setAttribute('scale', '1 1 1');
+            var txt = el.querySelector('a-text');
+            if(txt) txt.setAttribute('color', '#FFFFFF');
+          });
+        }
+      });
+
+      AFRAME.registerComponent('vr-controller-listener', {
+        init: function () {
+          this.el.addEventListener('abuttondown', toggleMenu3D);
+          this.el.addEventListener('xbuttondown', toggleMenu3D);
+        }
+      });
+
+      function iniciarTransicion(nombreEscena, direccionDeseada) {
+        if (escenaActual === nombreEscena) return; 
+        escenaActual = nombreEscena; 
+        
+        var datos = escenas[nombreEscena];
+        var contenedorFlechas = document.querySelector('#flechas-container');
+        var cieloFondo = document.querySelector('#cielo-fondo'); 
+        var overlayFade = document.querySelector('#overlay-fade');
+        var btnLanzarMinijuego = document.querySelector('#btn-lanzar-minijuego');
+        var fondoOscuro = document.querySelector('#hotspot-darkbg'); 
+        var duracionFade = 500; 
+
+        contenedorFlechas.setAttribute('visible', 'false');
+        btnLanzarMinijuego.setAttribute('visible', 'false');
+        btnLanzarMinijuego.classList.remove('clickable');
+        if(fondoOscuro) fondoOscuro.setAttribute('visible', 'false'); 
+
+        var todosLosVideos = document.querySelectorAll('video');
+        todosLosVideos.forEach(v => v.muted = true);
+
+        var todosHotspots = document.querySelectorAll('.grupo-hotspots');
+        todosHotspots.forEach(function(grupo) {
+            grupo.setAttribute('visible', 'false');
+            var paneles = grupo.querySelectorAll('.panel-activo');
+            paneles.forEach(p => { p.setAttribute('visible', 'false'); p.classList.remove('panel-activo'); });
+            var iconos = grupo.querySelectorAll('.icono-hotspot');
+            iconos.forEach(i => {
+                i.classList.remove('clickable');
+                if(i.hasAttribute('hotspot-video')) i.setAttribute('visible', 'true');
+            });
+        });
+        
+        overlayFade.setAttribute('animation', { property: 'material.opacity', from: 0, to: 1, dur: duracionFade, easing: 'linear' });
+
+        setTimeout(() => {
+            cieloFondo.setAttribute('src', datos.imagen);
+            cieloFondo.setAttribute('rotation', datos.rotacionSky || "0 -90 0");
+            generarFlechas(datos.flechas);
+            
+            var rig = document.querySelector('#rig');
+            rig.setAttribute('rotation', direccionDeseada || "0 0 0");
+
+            var camara = document.querySelector('#camara-principal');
+            var lookControls = camara.components['look-controls'];
+            if (lookControls) { lookControls.pitchObject.rotation.x = 0; lookControls.yawObject.rotation.y = 0; }
+
+            function revelarEscena() {
+                cieloFondo.removeEventListener('materialtextureloaded', revelarEscena);
+                contenedorFlechas.setAttribute('visible', 'true');
+                
+                if (nombreEscena === 'basquet') {
+                    btnLanzarMinijuego.setAttribute('visible', 'true');
+                    btnLanzarMinijuego.classList.add('clickable');
+                }
+                
+                var hotspotActual = document.querySelector('#hotspots-' + nombreEscena);
+                if (hotspotActual) {
+                    hotspotActual.setAttribute('visible', 'true');
+                    var iconos = hotspotActual.querySelectorAll('.icono-hotspot');
+                    iconos.forEach(i => i.classList.add('clickable'));
+                }
+
+                overlayFade.setAttribute('animation', { property: 'material.opacity', from: 1, to: 0, dur: duracionFade, easing: 'linear' });
+                
+                if (nombreEscena === 'entrada') {
+                    mostrarMensajeEntrada();
+                }
+            }
+            cieloFondo.addEventListener('materialtextureloaded', revelarEscena);
+        }, duracionFade + 50);
+      }
+
+      function resetearPelota() {
+          var pelota = document.querySelector('#pelota-interactiva');
+          if (pelota) {
+              pelota.components['telekinesis-balon'].agarrado = false;
+              if (!pelota.getAttribute('dynamic-body')) pelota.setAttribute('dynamic-body', 'mass: 1; bounce: 0.75');
+              setTimeout(() => {
+                  if (pelota.components['dynamic-body']) {
+                      pelota.components['dynamic-body'].body.velocity.set(0,0,0);
+                      pelota.components['dynamic-body'].body.angularVelocity.set(0,0,0);
+                      pelota.components['dynamic-body'].body.position.set(0, 1.2, -2); 
+                  }
+              }, 50);
+          }
+      }
+
+      function activarMinijuego() {
+          document.querySelector('#flechas-container').setAttribute('visible', 'false');
+          document.querySelector('#btn-lanzar-minijuego').setAttribute('visible', 'false');
+          document.querySelector('#btn-lanzar-minijuego').classList.remove('clickable');
+          document.querySelector('#entorno-fisicas-basquet').setAttribute('visible', 'true');
+          var btnVolver = document.querySelector('#btn-volver-tour');
+          btnVolver.classList.add('clickable');
+          var btnReset = document.querySelector('#btn-reset-balon');
+          btnReset.classList.add('clickable');
+          resetearPelota();
+      }
+
+      function desactivarMinijuego() {
+          document.querySelector('#entorno-fisicas-basquet').setAttribute('visible', 'false');
+          document.querySelector('#btn-volver-tour').classList.remove('clickable');
+          document.querySelector('#btn-reset-balon').classList.remove('clickable');
+          document.querySelector('#flechas-container').setAttribute('visible', 'true');
+          var btnLanzarMinijuego = document.querySelector('#btn-lanzar-minijuego');
+          btnLanzarMinijuego.setAttribute('visible', 'true');
+          btnLanzarMinijuego.classList.add('clickable');
+      }
+
+      // =============================================================
+      // NUEVA LÓGICA DE DIBUJADO DE FLECHAS (CAJA BLANCA ADAPTATIVA)
+      // =============================================================
+      function generarFlechas(listaFlechas) {
+        var contenedor = document.querySelector('#flechas-container');
+        contenedor.innerHTML = '';
+        listaFlechas.forEach(flecha => {
+          var wrapper = document.createElement('a-entity');
+          wrapper.setAttribute('position', flecha.position);
+          wrapper.setAttribute('animation', `property: position; dir: alternate; dur: 2000; easing: easeInOutSine; loop: true; to: ${flecha.position.split(' ')[0]} ${parseFloat(flecha.position.split(' ')[1]) + 0.2} ${flecha.position.split(' ')[2]}`);
+
+          var entidad = document.createElement('a-image');
+          entidad.setAttribute('src', '#img-flecha-plana');
+          // Escala del icono reducida (Antes 1.8, ahora 1.4)
+          entidad.setAttribute('scale', '1.4 1.4 1.4'); 
+          entidad.setAttribute('look-at', '[camera]'); 
+          entidad.setAttribute('transparent', 'true');
+          entidad.setAttribute('data-target', flecha.target);
+          entidad.setAttribute('class', 'clickable'); 
+          if (flecha.mirarAlLlegar) entidad.setAttribute('data-mirar', flecha.mirarAlLlegar);
+          entidad.setAttribute('tour-logic', ''); 
+
+          var nombreLugar = nombresDestinos[flecha.target] || flecha.target;
+          
+          // CÁLCULO INTELIGENTE DEL ANCHO: Se basa solo en la línea más larga de texto
+          var lineas = nombreLugar.split('\n');
+          var maxLong = 0;
+          for(var i=0; i<lineas.length; i++) {
+              if(lineas[i].length > maxLong) maxLong = lineas[i].length;
+          }
+
+          var etiqueta = document.createElement('a-entity');
+          etiqueta.classList.add('etiqueta-flotante');
+          // Lo subimos un poco para separarlo de la flecha
+          etiqueta.setAttribute('position', '0 1.2 0.05'); 
+          // Reducimos la escala para que no sature la vista
+          etiqueta.setAttribute('scale', '0.6 0.6 0.6'); 
+          etiqueta.setAttribute('visible', 'false'); 
+
+          var fondo = document.createElement('a-plane');
+          fondo.setAttribute('color', '#FFFFFF'); 
+          fondo.setAttribute('opacity', '0.95');
+          // Ancho proporcional a la línea más larga (evita cajas inmensas en textos de 2 líneas)
+          fondo.setAttribute('width', (Math.max(maxLong * 0.35, 1.8)).toString()); 
+          // Alto adaptable: si hay más de 1 línea, es más alto
+          fondo.setAttribute('height', lineas.length > 1 ? '0.9' : '0.55'); 
+          fondo.setAttribute('position', '0 0 -0.01'); 
+          etiqueta.appendChild(fondo);
+
+          var texto = document.createElement('a-text');
+          texto.setAttribute('value', nombreLugar);
+          texto.setAttribute('align', 'center');
+          texto.setAttribute('color', '#E3173E'); 
+          texto.setAttribute('width', '8.5'); 
+          texto.setAttribute('position', '0 0 0.01'); 
+          etiqueta.appendChild(texto);
+
+          entidad.appendChild(etiqueta);
+          wrapper.appendChild(entidad);
+          contenedor.appendChild(wrapper);
+        });
+      }
+
+      function construirMenu3D() {
+        var menu = document.querySelector('#menu-3d');
+        var keys = Object.keys(nombresDestinos);
+
+        var panelFondo = document.createElement('a-plane');
+        panelFondo.setAttribute('width', '4.8');     
+        panelFondo.setAttribute('height', '3.6'); 
+        panelFondo.setAttribute('color', '#000000'); 
+        panelFondo.setAttribute('opacity', '0.65');  
+        panelFondo.setAttribute('position', '0 0.15 -0.05'); 
+        menu.appendChild(panelFondo);
+        
+        var titulo = document.createElement('a-text');
+        titulo.setAttribute('value', 'MAPA VIRTUAL ESAN');
+        titulo.setAttribute('align', 'center');
+        titulo.setAttribute('color', '#FFFFFF'); 
+        titulo.setAttribute('position', '0 1.7 0');
+        titulo.setAttribute('width', '5');
+        menu.appendChild(titulo);
+
+        let cols = 5;
+        let startX = -1.8; let startY = 1.3; let gapX = 0.9; let gapY = 0.4;
+
+        keys.forEach((key, index) => {
+          let col = index % cols; let row = Math.floor(index / cols);
+          let posX = startX + (col * gapX); let posY = startY - (row * gapY);
+
+          var btn = document.createElement('a-plane');
+          btn.setAttribute('width', '0.8'); btn.setAttribute('height', '0.3');
+          btn.setAttribute('color', '#E3173E'); btn.setAttribute('opacity', '0.95'); 
+          btn.setAttribute('position', `${posX} ${posY} 0`);
+          btn.setAttribute('class', 'menu-btn'); btn.setAttribute('data-target', key);
+          btn.setAttribute('menu-interactivo', '');
+          
+          var txt = document.createElement('a-text');
+          txt.setAttribute('value', nombresDestinos[key]);
+          txt.setAttribute('align', 'center'); txt.setAttribute('color', '#FFFFFF'); 
+          txt.setAttribute('width', '0.65'); txt.setAttribute('wrap-count', '14'); 
+          txt.setAttribute('position', '0 0 0.02'); 
+          btn.appendChild(txt);
+          menu.appendChild(btn);
+        });
+
+        var btnEnlace = document.createElement('a-plane');
+        btnEnlace.setAttribute('width', '3.0'); btnEnlace.setAttribute('height', '0.25'); 
+        btnEnlace.setAttribute('color', '#222222'); btnEnlace.setAttribute('opacity', '0.95');
+        btnEnlace.setAttribute('position', '0 -1.2 0'); btnEnlace.setAttribute('class', 'menu-btn'); 
+        
+        var txtEnlace = document.createElement('a-text');
+        txtEnlace.setAttribute('value', 'Regresar a la trayectoria historica');
+        txtEnlace.setAttribute('align', 'center'); txtEnlace.setAttribute('color', '#FFFFFF'); 
+        txtEnlace.setAttribute('width', '2.8'); txtEnlace.setAttribute('wrap-count', '35'); 
+        txtEnlace.setAttribute('position', '0 0 0.02'); 
+        btnEnlace.appendChild(txtEnlace);
+
+        btnEnlace.addEventListener('click', function () { window.location.href = 'https://esanlabs.github.io/Doble-videos-Esan/'; });
+        btnEnlace.addEventListener('mouseenter', function () {
+            btnEnlace.setAttribute('color', '#FFFFFF'); btnEnlace.setAttribute('scale', '1.05 1.05 1.05'); txtEnlace.setAttribute('color', '#E3173E'); 
+        });
+        btnEnlace.addEventListener('mouseleave', function () {
+            btnEnlace.setAttribute('color', '#222222'); btnEnlace.setAttribute('scale', '1 1 1'); txtEnlace.setAttribute('color', '#FFFFFF'); 
+        });
+
+        menu.appendChild(btnEnlace);
+      }
+
+      function toggleMenu3D() {
+        var menu = document.querySelector('#menu-3d');
+        var cam = document.querySelector('#camara-principal');
+        var btn2D = document.getElementById('btn-menu-2d');
+        var isVisible = menu.getAttribute('visible');
+        if (!isVisible) {
+            var cam3D = cam.getObject3D('camera');
+            if (cam3D) {
+                var posCamara = new THREE.Vector3();
+                cam3D.getWorldPosition(posCamara);
+                var vectorDireccion = new THREE.Vector3();
+                cam3D.getWorldDirection(vectorDireccion);
+                vectorDireccion.multiplyScalar(2.5);
+                var nuevaPosicion = posCamara.clone().add(vectorDireccion);
+                menu.setAttribute('position', nuevaPosicion);
+                menu.setAttribute('look-at', '[camera]');
+            }
+            menu.setAttribute('visible', 'true');
+            if (btn2D) btn2D.innerText = 'Cerrar Menu de Navegacion';
+            var botonesMenu = menu.querySelectorAll('.menu-btn');
+            botonesMenu.forEach(b => b.classList.add('clickable'));
+        } else {
+            menu.setAttribute('visible', 'false');
+            if (btn2D) btn2D.innerText = 'Abrir Menu de Navegacion';
+            var botonesMenu = menu.querySelectorAll('.menu-btn');
+            botonesMenu.forEach(b => b.classList.remove('clickable'));
+        }
+      }
+
+      function iniciarSecuenciaIntro() {
+        var hud = document.querySelector('#intro-hud');
+        var bg = document.querySelector('#intro-bg');
+        var txt1 = document.querySelector('#intro-text1');
+        
+        if(!hud) return;
+        
+        hud.setAttribute('visible', 'true');
+        hud.setAttribute('animation__pos', 'property: position; from: 0 0.2 -3.5; to: 0 0.2 -2.5; dur: 2500; easing: easeOutQuart');
+
+        setTimeout(() => {
+            bg.setAttribute('animation__in', 'property: opacity; from: 0; to: 0.75; dur: 1500; easing: linear');
+            txt1.setAttribute('animation__in', 'property: opacity; from: 0; to: 1; dur: 1500; easing: linear');
+        }, 500); 
+
+        setTimeout(() => {
+            txt1.setAttribute('animation__out', 'property: opacity; from: 1; to: 0; dur: 1000; easing: linear');
+            bg.setAttribute('animation__out', 'property: opacity; from: 0.75; to: 0; dur: 1000; easing: linear');
+        }, 4500); 
+        
+        setTimeout(() => {
+           hud.setAttribute('visible', 'false');
+        }, 6000);
+      }
+
+      function mostrarMensajeEntrada() {
+        var hud = document.querySelector('#entrada-hud');
+        var bg = document.querySelector('#entrada-bg');
+        var txt = document.querySelector('#entrada-text');
+        
+        if(!hud) return;
+        
+        hud.setAttribute('visible', 'true');
+        bg.setAttribute('opacity', '0');
+        txt.setAttribute('opacity', '0');
+        
+        hud.setAttribute('animation__pos', 'property: position; from: 0 0.2 -3.5; to: 0 0.2 -2.5; dur: 2500; easing: easeOutQuart');
+
+        setTimeout(() => {
+            bg.setAttribute('animation__in', 'property: opacity; from: 0; to: 0.75; dur: 1500; easing: linear');
+            txt.setAttribute('animation__in', 'property: opacity; from: 0; to: 1; dur: 1500; easing: linear');
+        }, 500); 
+
+        setTimeout(() => {
+            txt.setAttribute('animation__out', 'property: opacity; from: 1; to: 0; dur: 1000; easing: linear');
+            bg.setAttribute('animation__out', 'property: opacity; from: 0.75; to: 0; dur: 1000; easing: linear');
+        }, 4500); 
+        
+        setTimeout(() => {
+           hud.setAttribute('visible', 'false');
+        }, 6000);
+      }
+
+      window.addEventListener('click', function() {
+        var videos = document.querySelectorAll('video');
+        videos.forEach(function(v) {
+            if (v.paused && v.hasAttribute('muted')) v.play().catch(e => console.log("Click the screen first"));
+        });
+      }, { once: true });
+
+      window.onload = function() { 
+        var datos = escenas['fuera']; 
+        var cieloFondo = document.querySelector('#cielo-fondo');
+        cieloFondo.setAttribute('src', datos.imagen);
+        cieloFondo.setAttribute('rotation', datos.rotacionSky || '0 -90 0');
+        generarFlechas(datos.flechas);
+        construirMenu3D();
+        
+        cieloFondo.addEventListener('materialtextureloaded', function onFirstTexture() {
+            cieloFondo.removeEventListener('materialtextureloaded', onFirstTexture);
+            ocultarLoader(); 
+        });
+
+        document.getElementById('btn-menu-2d').addEventListener('click', toggleMenu3D);
+        document.querySelector('#btn-lanzar-minijuego').addEventListener('click', activarMinijuego);
+        document.querySelector('#btn-volver-tour').addEventListener('click', desactivarMinijuego);
+        document.querySelector('#btn-reset-balon').addEventListener('click', resetearPelota);
+
+        document.getElementById('btn-capturar').addEventListener('click', function() {
+            var cam = document.querySelector('#camara-principal').getObject3D('camera');
+            if (!cam) return;
+            var vectorDireccion = new THREE.Vector3();
+            cam.getWorldDirection(vectorDireccion);
+            var distancia = 12; 
+            var posX = (vectorDireccion.x * distancia).toFixed(2);
+            var posY = (vectorDireccion.y * distancia).toFixed(2); 
+            var posZ = (vectorDireccion.z * distancia).toFixed(2);
+            var anguloRad = Math.atan2(vectorDireccion.x, vectorDireccion.z);
+            var rotY = Math.round(anguloRad * (180 / Math.PI));
+            var codigoGenerado = `{ target: 'DESTINO', position: '${posX} ${posY} ${posZ}', rotation: '0 ${rotY} 0' },`;
+            navigator.clipboard.writeText(codigoGenerado).then(function() {
+                alert("✅ ¡Cartel capturado!\n\n" + codigoGenerado + "\n\nPegalo en tu código.");
+            }).catch(function() { prompt("Copia este código:", codigoGenerado); });
+        });
+      };
+
+      function ocultarLoader() {
+        var loader = document.getElementById('pantalla-carga');
+        if (loader) {
+          loader.classList.add('oculto');
+          setTimeout(() => { 
+              loader.style.display = 'none'; 
+              iniciarSecuenciaIntro(); 
+          }, 1000);
+        }
+      }
+    </script>
+  </head>
+  
+  <body>
+    <div id="pantalla-carga">
+        <h1 style="font-size: 3em; margin-bottom: 10px;">Tour ESAN 360</h1>
+        <p style="font-size: 1.2em; letter-spacing: 2px;">INICIANDO REALIDAD VIRTUAL...</p>
+    </div>
+
+    <button id="btn-menu-2d">Abrir Menu de Navegacion</button>
+    <button id="btn-capturar">🎯 Capturar Coordenada</button>
+
+    <a-scene 
+      physics="debug: false; gravity: -9.8"
+      renderer="antialias: true; colorManagement: true; sortObjects: true;"
+      cursor="rayOrigin: mouse" 
+      raycaster="objects: .clickable">
+      
+      <a-assets timeout="60000"> 
+        <img id="img-fuera" src="imagenes/fuera%20de%20esan.jpg">
+        <img id="img-entrada" src="imagenes/entrada%20esan.jpg">
+        <img id="img-jardin" src="imagenes/jardin%20central.jpg">
+        <img id="img-fuente" src="imagenes/fuente%20jardin%20central.jpg">
+        <img id="img-capilla" src="imagenes/capilla.jpg">
+        <img id="img-cafeteria" src="imagenes/cafeteria.jpg">
+        <img id="img-eventos" src="imagenes/espacio%20de%20eventos.jpg">
+        <img id="img-auditorio" src="imagenes/butacas%20del%20SCS.jpg">
+        <img id="img-voley" src="imagenes/cancha%20de%20voley.jpg">
+        <img id="img-basquet" src="imagenes/cancha%20de%20basquet.jpg">
+        <img id="img-fablab-salon" src="imagenes/salon%20de%20fablab.jpg">
+        <img id="img-fablab1" src="imagenes/fablab%20sala%201.jpg">
+        <img id="img-aulas" src="imagenes/aulas.jpg">
+        <img id="img-aula-hibrida" src="imagenes/aula%20hibrida.jpg">
+        <img id="img-computo" src="imagenes/laboratorio%20de%20computo.jpg">
+        <img id="img-datalab" src="imagenes/laboratorio%20de%20datalab.jpg">
+        <img id="img-conductual" src="imagenes/sala%20conductual.jpg">
+        <img id="img-biblioteca" src="imagenes/biblioteca.jpg">
+        <img id="img-danza" src="imagenes/danza.jpg">
+        <img id="img-fisica" src="imagenes/laboratorio%20de%20fisica.jpg">
+        <img id="img-quimica" src="imagenes/laboratorio%20de%20quimica.jpg">
+        <img id="img-estudio-pregrado" src="imagenes/salas%20de%20estudio%20pregrado.jpg">
+        <img id="img-estudio-mba" src="imagenes/salas%20de%20estudio%20mba.jpg">
+        <img id="img-estudio-magister" src="imagenes/salas%20de%20estudio%20magister.jpg">
+        <img id="img-descanso-magister" src="imagenes/sala%20de%20descanso%20magister.jpg">
+
+        <img id="img-logo" src="imagenes/esan.png">
+        <img id="img-flecha-plana" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='45' fill='rgba(255,255,255,0.8)' stroke='%23E3173E' stroke-width='6'/><path d='M30 60 L50 40 L70 60' fill='none' stroke='%23E3173E' stroke-width='8' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+        
+        <img id="img-icon-info" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='45' fill='%23E3173E'/><text x='50' y='75' font-family='Arial' font-size='65' font-weight='bold' fill='white' text-anchor='middle'>i</text></svg>">
+        <img id="img-icon-dato" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='45' fill='%23E3173E'/><path d='M50,25 l7,20 l21,1 l-16,13 l6,21 L50,67 l-18,13 l6,-21 l-16,-13 l21,-1 z' fill='white'/></svg>">
+        <img id="img-icon-vida" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='45' fill='%23E3173E'/><path d='M20,40 L50,25 L80,40 L50,55 Z M30,50 L30,70 L50,80 L70,70 L70,50 M80,40 L80,60' fill='none' stroke='white' stroke-width='8' stroke-linejoin='round'/></svg>">
+        
+        <img id="img-play-btn" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='45' fill='%23FF0000'/><polygon points='40,30 40,70 75,50' fill='white'/></svg>">
+        <video id="vid-ejemplo" src="videos/tu-video-aqui.mp4" playsinline webkit-playsinline autoplay loop muted crossorigin="anonymous"></video>
+      </a-assets>
+
+      <a-sky id="cielo-fondo" radius="500" rotation="0 -90 0"></a-sky>
+      <a-light type="ambient" color="#FFF" intensity="1.5"></a-light>
+      
+      <a-entity id="hotspot-darkbg" geometry="primitive: sphere; radius: 100" material="color: #000000; transparent: true; opacity: 0.8; side: back" visible="false"></a-entity>
+
+      <a-entity id="flechas-container"></a-entity>
+      <a-entity id="menu-3d" visible="false"></a-entity>
+
+      <a-entity id="hotspots-jardin" class="grupo-hotspots" visible="false">
+          <a-image src="#img-icon-info" position="-3 1.5 -5" scale="0.65 0.65 0.65" look-at="[camera]" class="clickable icono-hotspot" hotspot-info="target: #panel-info; action: toggle"></a-image>
+          <a-entity id="panel-info" visible="false" smooth-follow scale="2.2 2.2 2.2">
+              <a-plane color="#FFFFFF" opacity="0.95" width="4" height="2.8" position="0 0 0"></a-plane>
+              <a-text value="INFORMACION" color="#E3173E" align="center" width="7" position="0 1.05 0.01"></a-text>
+              <a-text value="Este es el area principal de descanso para los alumnos de ESAN.\n\nAquí puedes relajarte, conversar o estudiar al aire libre rodeado de naturaleza." color="#333333" align="center" width="3.5" position="0 -0.1 0.01" wrap-count="35"></a-text>
+              <a-plane class="clickable close-btn" color="#FF0000" width="0.4" height="0.4" position="1.7 1.1 0.02" hotspot-info="target: #panel-info; action: close">
+                  <a-text value="X" color="#FFFFFF" align="center" width="6" position="0 0 0.01"></a-text>
+              </a-plane>
+          </a-entity>
+
+          <a-image src="#img-icon-dato" position="0 1.5 -5" scale="0.65 0.65 0.65" look-at="[camera]" class="clickable icono-hotspot" hotspot-info="target: #panel-dato; action: toggle"></a-image>
+          <a-entity id="panel-dato" visible="false" smooth-follow scale="2.2 2.2 2.2">
+              <a-plane color="#FFFFFF" opacity="0.95" width="4" height="2.8" position="0 0 0"></a-plane>
+              <a-text value="DATO ESAN" color="#E3173E" align="center" width="7" position="0 1.05 0.01"></a-text>
+              <a-text value="¿Sabias que...? El diseño del campus esta pensado para maximizar la entrada de luz natural, reduciendo la huella de carbono de la universidad." color="#333333" align="center" width="3.5" position="0 -0.1 0.01" wrap-count="35"></a-text>
+              <a-plane class="clickable close-btn" color="#FF0000" width="0.4" height="0.4" position="1.7 1.1 0.02" hotspot-info="target: #panel-dato; action: close">
+                  <a-text value="X" color="#FFFFFF" align="center" width="6" position="0 0 0.01"></a-text>
+              </a-plane>
+          </a-entity>
+
+          <a-image src="#img-icon-vida" position="3 1.5 -5" scale="0.65 0.65 0.65" look-at="[camera]" class="clickable icono-hotspot" hotspot-info="target: #panel-vida; action: toggle"></a-image>
+          <a-entity id="panel-vida" visible="false" smooth-follow scale="2.2 2.2 2.2">
+              <a-plane color="#FFFFFF" opacity="0.95" width="4" height="2.8" position="0 0 0"></a-plane>
+              <a-text value="VIDA ESTUDIANTIL" color="#E3173E" align="center" width="7" position="0 1.05 0.01"></a-text>
+              <a-text value="Durante la semana de parciales, los jardines se llenan de grupos de estudio.\n\n¡Es el corazon social del campus donde nacen grandes amistades!" color="#333333" align="center" width="3.5" position="0 -0.1 0.01" wrap-count="35"></a-text>
+              <a-plane class="clickable close-btn" color="#FF0000" width="0.4" height="0.4" position="1.7 1.1 0.02" hotspot-info="target: #panel-vida; action: close">
+                  <a-text value="X" color="#FFFFFF" align="center" width="6" position="0 0 0.01"></a-text>
+              </a-plane>
+          </a-entity>
+      </a-entity>
+
+      <a-entity id="hotspots-datalab" class="grupo-hotspots" visible="false">
+          <a-entity id="thumb-video-1" position="-3 1.5 -5" look-at="[camera]" class="clickable icono-hotspot" hotspot-video="video: #vid-ejemplo; panel: #panel-video-1">
+              <a-video src="#vid-ejemplo" width="3" height="1.68" position="0 0 0"></a-video> 
+              <a-image src="#img-play-btn" scale="0.6 0.6 0.6" position="0 0 0.05" opacity="0.8"></a-image>
+          </a-entity>
+          <a-entity id="panel-video-1" visible="false" smooth-follow scale="1.8 1.8 1.8">
+              <a-video src="#vid-ejemplo" width="6" height="3.375" position="0 0 0"></a-video>
+              <a-plane class="close-video-btn" color="#FF0000" width="0.4" height="0.4" position="2.8 1.5 0.02" close-video="video: #vid-ejemplo; panel: #panel-video-1; thumb: #thumb-video-1">
+                  <a-text value="X" color="#FFFFFF" align="center" width="6" position="0 0 0.01"></a-text>
+              </a-plane>
+          </a-entity>
+      </a-entity>
+
+      <a-plane id="btn-lanzar-minijuego" position="3 1.5 -8" look-at="[camera]" width="3" height="1" color="#E3173E" visible="false">
+          <a-text value="¡Juega un rato!" align="center" color="#FFFFFF" scale="1.5 1.5 1.5"></a-text>
+      </a-plane>
+      <a-entity id="entorno-fisicas-basquet" position="0 0 0" visible="false" sistema-puntos>
+          <a-plane static-body position="0 0 0" rotation="-90 0 0" width="20" height="20" color="#222222" opacity="0.8"></a-plane>
+          <a-box static-body position="0 4 -12" width="2.5" height="1.5" depth="0.1" color="#FF0000" opacity="0.6"></a-box>
+          <a-text id="texto-marcador" value="PUNTOS: 0" position="0 6 -12" align="center" color="#FFD700" scale="3 3 3"></a-text>
+          <a-sphere id="pelota-interactiva" class="clickable" telekinesis-balon dynamic-body="mass: 1; bounce: 0.75" position="0 1.5 -2" radius="0.3" color="#D95C14"></a-sphere>
+          <a-plane id="btn-volver-tour" position="-3 1.5 -5" look-at="[camera]" width="2.5" height="0.8" color="#333333"><a-text value="Volver al Tour" align="center" color="#FFFFFF"></a-text></a-plane>
+          <a-plane id="btn-reset-balon" position="3 1.5 -5" look-at="[camera]" width="2.5" height="0.8" color="#00BFFF"><a-text value="Resetear Balon" align="center" color="#FFFFFF"></a-text></a-plane>
+          <a-light type="point" intensity="1.2" position="0 5 0"></a-light>
+      </a-entity>
+
+      <a-entity id="rig" position="0 1.6 0" rotation="0 0 0">
+        <a-entity rotate-with-camera position="0 -1.5 0">
+            <a-circle src="#img-logo" radius="1.5" position="0 0 0" rotation="-90 0 0" material="transparent: true; opacity: 1" shader="flat"></a-circle>
+        </a-entity>
+        
+        <a-camera id="camara-principal" camera fov="80" wasd-controls-enabled="false" look-controls="reverseMouseDrag: true">
+            <a-entity id="overlay-fade" geometry="primitive: sphere; radius: 0.1" material="color: #000; transparent: true; opacity: 0; side: back" position="0 0 0"></a-entity>
+            <a-entity geometry="primitive: ring; radiusInner: 0.015; radiusOuter: 0.025" material="color: #00BFFF; shader: flat; opacity: 0.8" position="0 0 -1" raycaster="enabled: false"></a-entity>
+            
+            <a-entity id="intro-hud" position="0 0.2 -3.5" visible="false">
+                <a-plane id="intro-bg" color="#000" opacity="0" width="3.5" height="1.2" transparent="true"></a-plane>
+                <a-text id="intro-text1" value="Bienvenido a ESAN.\n\nExplora el campus y descubre\ndonde comienza tu futuro." align="center" color="#FFFFFF" width="4.5" position="0 0 0.01" opacity="0" transparent="true"></a-text>
+            </a-entity>
+
+            <a-entity id="entrada-hud" position="0 0.2 -3.5" visible="false">
+                <a-plane id="entrada-bg" color="#000" opacity="0" width="3.5" height="1.2" transparent="true"></a-plane>
+                <a-text id="entrada-text" value="Mira a tu alrededor.\n\nCada espacio cuenta una historia." align="center" color="#FFD700" width="4.5" position="0 0 0.01" opacity="0" transparent="true"></a-text>
+            </a-entity>
+        </a-camera>
+        
+        <a-entity laser-controls="hand: right" raycaster="objects: .clickable" vr-controller-listener></a-entity>
+        <a-entity laser-controls="hand: left" raycaster="objects: .clickable" vr-controller-listener></a-entity>
+      </a-entity>
+
+    </a-scene>
+  </body>
+</html>
